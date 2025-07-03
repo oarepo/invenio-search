@@ -14,6 +14,7 @@ import json
 import os
 import warnings
 from importlib.resources import files
+from importlib.metadata import files as metadata_files
 
 import dictdiffer
 from invenio_base.utils import entry_points
@@ -146,36 +147,32 @@ class _SearchState(object):
         :param package_name: The package name.
         """
         package_name = self._get_mappings_module(package_name)
-
+        
         def _walk_dir(aliases, *parts):
             root_name = build_index_from_parts(*parts)
             resource_name = os.path.join(*parts)
 
             data = aliases.get(root_name, {})
 
-            for filename in os.listdir(files(package_name) / resource_name):
-                file_path = os.path.join(resource_name, filename)
-
-                if (files(package_name) / file_path).is_dir():
-                    _walk_dir(data, *(parts + (filename,)))
+            package_root = package_name.split(".")[0]            
+            all_files = metadata_files(package_root)
+            path = "/".join(package_name.split("."))
+            
+            relevant_files = [
+                file for file in all_files
+                if (path + "/" + resource_name) in str(file)
+            ]
+            for file in relevant_files:
+                if not file.name.lower().endswith(".json"):
                     continue
-
-                filename_root, ext = os.path.splitext(filename)
-                if ext not in {
-                    ".json",
-                }:
-                    continue
-
-                index_name = build_index_from_parts(*(parts + (filename_root,)))
+                
+                index_name = build_index_from_parts(*(parts + (file.stem,)))
                 assert index_name not in data, "Duplicate index"
-
-                filename = os.path.join(files(package_name), resource_name, filename)
-                data[index_name] = filename
-                self.mappings[index_name] = filename
-
+                data[index_name] = file
+                self.mappings[index_name] = file
+                
             aliases[root_name] = data
 
-        # Start the recursion here:
         _walk_dir(self.aliases, alias)
 
     def register_templates(self, module):
@@ -189,24 +186,23 @@ class _SearchState(object):
         def _walk_dir(*parts):
             parts = parts or tuple()
             resource_name = os.path.join(*parts) if parts else ""
-            for filename in os.listdir(files(module) / resource_name):
-                file_path = os.path.join(resource_name, filename)
-
-                if (files(module) / file_path).is_dir():
-                    _walk_dir(*(parts + (filename,)))
+            
+            package_root = module.split(".")[0]            
+            all_files =metadata_files(package_root)
+            path = "/".join(module.split("."))
+            
+            relevant_files = [
+                file for file in all_files
+                if (path + "/" + resource_name) in str(file)
+            ]
+            
+            for file in relevant_files:
+                if not file.name.lower().endswith(".json"):
                     continue
+                
+                template_name = build_index_from_parts(*(parts + (file.stem,)))
+                result[template_name] = file
 
-                filename_root, ext = os.path.splitext(filename)
-                if ext not in {
-                    ".json",
-                }:
-                    continue
-
-                template_name = build_index_from_parts(*(parts + (filename_root,)))
-                filename = os.path.join(files(module), resource_name, filename)
-                result[template_name] = filename
-
-        # Start the recursion here:
         _walk_dir()
         return result
 
@@ -306,31 +302,32 @@ class _SearchState(object):
         # index if the current instance is running without suffixes
         # make sure there is no index with the same name as the
         # alias name (i.e. the index name without the suffix).
-        with open(mapping_path, "r") as body:
-            final_index = build_index_name(
-                index, prefix=prefix, suffix=suffix, app=self.app
+       
+        body =  mapping_path.read_text()
+        final_index = build_index_name(
+            index, prefix=prefix, suffix=suffix, app=self.app
+        )
+        if create_write_alias:
+            final_alias = build_alias_name(index, prefix=prefix, app=self.app)
+        index_result = (
+            self.client.indices.create(
+                index=final_index,
+                body=json.loads(body),
+                ignore=ignore,
             )
-            if create_write_alias:
-                final_alias = build_alias_name(index, prefix=prefix, app=self.app)
-            index_result = (
-                self.client.indices.create(
+            if not dry_run
+            else None
+        )
+        if create_write_alias:
+            alias_result = (
+                self.client.indices.put_alias(
                     index=final_index,
-                    body=json.load(body),
+                    name=final_alias,
                     ignore=ignore,
                 )
                 if not dry_run
                 else None
             )
-            if create_write_alias:
-                alias_result = (
-                    self.client.indices.put_alias(
-                        index=final_index,
-                        name=final_alias,
-                        ignore=ignore,
-                    )
-                    if not dry_run
-                    else None
-                )
         return (final_index, index_result), (final_alias, alias_result)
 
     def create(self, ignore=None, ignore_existing=False, index_list=None):

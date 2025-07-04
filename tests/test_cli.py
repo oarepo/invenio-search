@@ -28,6 +28,7 @@ def _get_version():
     version = "v{}" if SEARCH_DISTRIBUTION == ES else "os-v{}"
     return version.format(search_major_version)
 
+
 @pytest.mark.skip
 def test_init(app, template_entrypoints):
     """Run client initialization."""
@@ -107,6 +108,7 @@ def test_init(app, template_entrypoints):
 
     aliases = current_search_client.indices.get_alias()
     assert 0 == len(aliases)
+
 
 @pytest.mark.skip
 def test_list(app):

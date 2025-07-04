@@ -122,15 +122,15 @@ class _SearchState(object):
 
             # Make sure that the OpenSearch mappings are in the folder.
             # The fallback can be removed after transition to OpenSearch.
-            
+
             # Get package name from module, for example invenio_records_resources.records.mapping -> invenio_records_resources
             package_name = module.split(".")[0]
-            all_files = metadata_files(package_name) # get all files in that package
-            
+            all_files = metadata_files(package_name)  # get all files in that package
+
             # construct a path with given module name and subfolder
             # for example: invenio_records_resources.records.mapping -> invenio_records_resources/records/mapping -> invenio_records_resources/records/mapping/os-v2
-            subfolder_path = "/".join(module.split(".")) + "/" + subfolder 
-            
+            subfolder_path = "/".join(module.split(".")) + "/" + subfolder
+
             # check if there is a file that starts with that path name
             if not any(str(file_).startswith(subfolder_path) for file_ in all_files):
                 # fallback to ES folder with a warning if `os-vx` is not found
@@ -154,43 +154,42 @@ class _SearchState(object):
 
         :param alias: The alias.
         :param package_name: The package name.
-        
+
         .. note:: Implementation then later assumes that mappings/templates have implemented read_text() function.
         In the current version all paths to mappings/templates are instances of PackagePath.
         """
         package_name = self._get_mappings_module(package_name)
-        
+
         def _walk_dir(aliases, *parts):
             root_name = build_index_from_parts(*parts)
             resource_name = os.path.join(*parts)
 
             data = aliases.get(root_name, {})
 
-            # Get package name from module, for example invenio_records_resources.records.mapping -> invenio_records_resources 
+            # Get package name from module, for example invenio_records_resources.records.mapping -> invenio_records_resources
             package_root = package_name.split(".")[0]
-            # Get all files in that package            
+            # Get all files in that package
             all_files = metadata_files(package_root)
             path = "/".join(package_name.split("."))
-            
+
             # Retrieve only necessary files
             # For example:
-            # package_name = invenio_records_resources.records.mapping.groups 
+            # package_name = invenio_records_resources.records.mapping.groups
             # then path = invenio_records_resources/records/mapping/groups
-            # and relevant files will be only invenio_records_resources/records/mapping/groups/*  
+            # and relevant files will be only invenio_records_resources/records/mapping/groups/*
             relevant_files = [
-                file for file in all_files
-                if (path + "/" + resource_name) in str(file)
+                file for file in all_files if (path + "/" + resource_name) in str(file)
             ]
             for file in relevant_files:
                 # filter out non json files
                 if not file.name.lower().endswith(".json"):
                     continue
-                
+
                 index_name = build_index_from_parts(*(parts + (file.stem,)))
                 assert index_name not in data, "Duplicate index"
                 data[index_name] = file
                 self.mappings[index_name] = file
-                
+
             aliases[root_name] = data
 
         _walk_dir(self.aliases, alias)
@@ -206,21 +205,20 @@ class _SearchState(object):
         def _walk_dir(*parts):
             parts = parts or tuple()
             resource_name = os.path.join(*parts) if parts else ""
-            
+
             # same logic as in register_mappings(...)
-            package_root = module.split(".")[0]            
-            all_files =metadata_files(package_root)
+            package_root = module.split(".")[0]
+            all_files = metadata_files(package_root)
             path = "/".join(module.split("."))
-            
+
             relevant_files = [
-                file for file in all_files
-                if (path + "/" + resource_name) in str(file)
+                file for file in all_files if (path + "/" + resource_name) in str(file)
             ]
-            
+
             for file in relevant_files:
                 if not file.name.lower().endswith(".json"):
                     continue
-                
+
                 template_name = build_index_from_parts(*(parts + (file.stem,)))
                 result[template_name] = file
 
@@ -323,9 +321,9 @@ class _SearchState(object):
         # index if the current instance is running without suffixes
         # make sure there is no index with the same name as the
         # alias name (i.e. the index name without the suffix).
-       
+
         # mapping path is now instance of PackagePath
-        body =  mapping_path.read_text()
+        body = mapping_path.read_text()
         final_index = build_index_name(
             index, prefix=prefix, suffix=suffix, app=self.app
         )
@@ -490,7 +488,7 @@ class _SearchState(object):
         fail if the template does not use the prefix
         """
         ignore = ignore or []
-        
+
         # template is now instance of PackagePath
         body = template_file.read_text()
         replaced_body = self._replace_prefix(template_file, body, enforce_prefix)

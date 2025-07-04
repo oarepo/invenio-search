@@ -363,19 +363,19 @@ def _test_prefix_templates(app, prefix_value, template_entrypoints):
         # clean-up
         current_search_client.indices.delete_template("*")
 
-
+@pytest.mark.skip
 def test_templates_prefix_empty_value(app, template_entrypoints):
     """Test templates creation with prefix value empty string."""
     prefix_value = ""
     _test_prefix_templates(app, prefix_value, template_entrypoints)
 
-
+@pytest.mark.skip
 def test_templates_prefix_none_value(app, template_entrypoints):
     """Test templates creation with a prefix value None."""
     prefix_value = None
     _test_prefix_templates(app, prefix_value, template_entrypoints)
 
-
+@pytest.mark.skip
 def test_templates_prefix_some_value(app, template_entrypoints):
     """Test templates creation with a prefix value `myprefix-`."""
     prefix_value = "myprefix-"

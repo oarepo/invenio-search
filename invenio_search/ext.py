@@ -467,15 +467,14 @@ class _SearchState(object):
         fail if the template does not use the prefix
         """
         ignore = ignore or []
-        with open(template_file, "r") as fp:
-            body = fp.read()
-            replaced_body = self._replace_prefix(template_file, body, enforce_prefix)
-            template_name = build_alias_name(template_name, app=self.app)
-            return template_file, put_function(
-                name=template_name,
-                body=json.loads(replaced_body),
-                ignore=ignore,
-            )
+        body = template_file.read_text()
+        replaced_body = self._replace_prefix(template_file, body, enforce_prefix)
+        template_name = build_alias_name(template_name, app=self.app)
+        return template_file, put_function(
+            name=template_name,
+            body=json.loads(replaced_body),
+            ignore=ignore,
+        )
 
     def put_templates(self, ignore=None):
         """Yield tuple with registered template and response from client."""

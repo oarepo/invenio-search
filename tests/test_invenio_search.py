@@ -125,6 +125,7 @@ def test_load_entry_point_group(template_entrypoints):
     ):
         assert set(ext.templates.keys()) == {"record-view-{}".format(_get_version())}
 
+
 @pytest.mark.skip
 @pytest.mark.parametrize(
     ("aliases_config", "expected_aliases"),
@@ -171,6 +172,7 @@ def test_whitelisted_aliases(app, aliases_config, expected_aliases):
             assert current_search_client.indices.exists(all_expected)
 
     app.config["SEARCH_MAPPINGS"] = orig
+
 
 @pytest.mark.skip
 @pytest.mark.parametrize(
@@ -235,6 +237,7 @@ def test_creating_alias_existing_index(
         assert index_names == new_indexes
         if create_index:
             assert len(indices[create_index]["aliases"]) == 0
+
 
 @pytest.mark.skip
 @pytest.mark.parametrize(
@@ -306,17 +309,20 @@ def _test_prefix_indices(app, prefix_value):
     # clean-up
     current_search_client.indices.delete("*", expand_wildcards="all")
 
+
 @pytest.mark.skip
 def test_indices_prefix_empty_value(app):
     """Test indices creation with prefix value empty string."""
     prefix_value = ""
     _test_prefix_indices(app, prefix_value)
 
+
 @pytest.mark.skip
 def test_indices_prefix_none_value(app):
     """Test indices creation with a prefix value None."""
     prefix_value = None
     _test_prefix_indices(app, prefix_value)
+
 
 @pytest.mark.skip
 def test_indices_prefix_some_value(app):
@@ -363,17 +369,20 @@ def _test_prefix_templates(app, prefix_value, template_entrypoints):
         # clean-up
         current_search_client.indices.delete_template("*")
 
+
 @pytest.mark.skip
 def test_templates_prefix_empty_value(app, template_entrypoints):
     """Test templates creation with prefix value empty string."""
     prefix_value = ""
     _test_prefix_templates(app, prefix_value, template_entrypoints)
 
+
 @pytest.mark.skip
 def test_templates_prefix_none_value(app, template_entrypoints):
     """Test templates creation with a prefix value None."""
     prefix_value = None
     _test_prefix_templates(app, prefix_value, template_entrypoints)
+
 
 @pytest.mark.skip
 def test_templates_prefix_some_value(app, template_entrypoints):
@@ -399,6 +408,7 @@ def test_not_dry_run_and_index_exists(app):
     with pytest.raises(IndexAlreadyExistsError):
         list(search.create())
 
+
 @pytest.mark.skip()
 def test_create_selected_indexes(app):
     search = app.extensions["invenio-search"]
@@ -423,6 +433,7 @@ def test_create_selected_indexes(app):
     assert search.client.indices.exists("authors-authors-v1.0.0") is False
     assert search.client.indices.exists("records-authorities-authority-v1.0.0") is False
 
+
 @pytest.mark.skip()
 def test_delete_selected_indexes(app):
     search = app.extensions["invenio-search"]
@@ -438,6 +449,7 @@ def test_delete_selected_indexes(app):
         is True
     )
 
+
 @pytest.mark.skip()
 def test_create_when_indexes_already_exists_with_ignore_existing_true(app):
     search = app.extensions["invenio-search"]
@@ -450,6 +462,7 @@ def test_create_when_indexes_already_exists_with_ignore_existing_true(app):
         search.client.indices.exists("records-bibliographic-bibliographic-v1.0.0")
         is True
     )
+
 
 @pytest.mark.skip()
 def test_update_mappings(app):

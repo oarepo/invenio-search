@@ -13,7 +13,6 @@
 import json
 import os
 import warnings
-from importlib.resources import files
 from importlib.metadata import files as metadata_files
 
 import dictdiffer
@@ -123,7 +122,11 @@ class _SearchState(object):
 
             # Make sure that the OpenSearch mappings are in the folder.
             # The fallback can be removed after transition to OpenSearch.
-            if not (files(module) / subfolder).is_dir():
+            package_name = module.split(".")[0]
+            all_files = metadata_files(package_name)
+            
+            subfolder_path = "/".join(module.split(".")) + "/" + subfolder
+            if not any(str(file_).startswith(subfolder_path) for file_ in all_files):
                 # fallback to ES folder with a warning if `os-vx` is not found
                 subfolder = "v7"
                 warnings.warn(

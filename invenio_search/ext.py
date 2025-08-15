@@ -11,9 +11,8 @@
 """Invenio module for information retrieval."""
 
 import json
-import os
 import warnings
-from importlib.metadata import files as metadata_files
+from importlib.resources import files as resources_files
 
 import dictdiffer
 from invenio_base.utils import entry_points
@@ -122,25 +121,35 @@ class _SearchState(object):
 
             # Make sure that the OpenSearch mappings are in the folder.
             # The fallback can be removed after transition to OpenSearch.
+            files = resources_files(module)
 
-            # Get package name from module, for example invenio_records_resources.records.mapping -> invenio_records_resources
-            package_name = module.split(".")[0]
-            all_files = metadata_files(package_name)  # get all files in that package
+            subfolder_parts = module.split(".")[1:] + [subfolder]
+            subfolder_path = "/".join(subfolder_parts)
 
-            # construct a path with given module name and subfolder
-            # for example: invenio_records_resources.records.mapping -> invenio_records_resources/records/mapping -> invenio_records_resources/records/mapping/os-v2
-            subfolder_path = "/".join(module.split(".")) + "/" + subfolder
+            def any_path_contains_str(traversable, path_part: str) -> bool:
+                """Check if any path inside `traversable` contains `path_part`."""
+                stack = [traversable]
+                while stack:
+                    current = stack.pop()
+                    current_str = str(current)
+                    # TODO: maybe check that there is at least 1 file in os-v2 folder
+                    if path_part in current_str:
+                        return True
+                    if current.is_dir():
+                        try:
+                            stack.extend(current.iterdir())
+                        except NotADirectoryError:
+                            pass
+                return False
 
-            # check if there is a file that starts with that path name
-            if not any(str(file_).startswith(subfolder_path) for file_ in all_files):
-                # fallback to ES folder with a warning if `os-vx` is not found
+            if not any_path_contains_str(files, subfolder_path):
                 subfolder = "v7"
                 warnings.warn(
-                    "OpenSearch v{version} mappings files not found, falling back to Elasticsearch v7 mappings for module {module}. Please add the missing OpenSearch os-v{version} mappings.".format(
-                        module=module,
-                        version=search_major_version,
-                    )
+                    f"OpenSearch v{search_major_version} mappings files not found, "
+                    f"falling back to Elasticsearch v7 mappings for module {module}. "
+                    f"Please add the missing OpenSearch os-v{search_major_version} mappings."
                 )
+
         else:
             # should never happen
             raise RuntimeError(
@@ -162,33 +171,30 @@ class _SearchState(object):
 
         def _walk_dir(aliases, *parts):
             root_name = build_index_from_parts(*parts)
-            resource_name = os.path.join(*parts)
-
             data = aliases.get(root_name, {})
 
-            # Get package name from module, for example invenio_records_resources.records.mapping -> invenio_records_resources
-            package_root = package_name.split(".")[0]
-            # Get all files in that package
-            all_files = metadata_files(package_root)
-            path = "/".join(package_name.split("."))
+            files = resources_files(package_name)
+            current_traversable = files
+            for part in parts:
+                current_traversable = current_traversable / part
 
-            # Retrieve only necessary files
-            # For example:
-            # package_name = invenio_records_resources.records.mapping.groups
-            # then path = invenio_records_resources/records/mapping/groups
-            # and relevant files will be only invenio_records_resources/records/mapping/groups/*
-            relevant_files = [
-                file for file in all_files if (path + "/" + resource_name) in str(file)
-            ]
-            for file in relevant_files:
-                # filter out non json files
-                if not file.name.lower().endswith(".json"):
-                    continue
+            if current_traversable.is_dir():
+                for file_traversable in current_traversable.iterdir():
+                    if file_traversable.is_dir():
+                        # Recurse into subdirectories
+                        _walk_dir(data, *(parts + (file_traversable.name,)))
 
-                index_name = build_index_from_parts(*(parts + (file.stem,)))
-                assert index_name not in data, "Duplicate index"
-                data[index_name] = file
-                self.mappings[index_name] = file
+                    if (
+                        file_traversable.is_file()
+                        and file_traversable.name.lower().endswith(".json")
+                    ):
+                        # split the path, get file name and remove the .json extension
+                        file_stem = file_traversable.name.split("/")[-1].strip(".json")
+                        index_name = build_index_from_parts(*(parts + (file_stem,)))
+
+                        assert index_name not in data, f"Duplicate index: {index_name}"
+                        data[index_name] = file_traversable
+                        self.mappings[index_name] = file_traversable
 
             aliases[root_name] = data
 
@@ -204,23 +210,27 @@ class _SearchState(object):
 
         def _walk_dir(*parts):
             parts = parts or tuple()
-            resource_name = os.path.join(*parts) if parts else ""
 
             # same logic as in register_mappings(...)
             package_root = module.split(".")[0]
-            all_files = metadata_files(package_root)
-            path = "/".join(module.split("."))
+            files = resources_files(package_root)
+            current_traversable = files
+            for part in parts:
+                current_traversable = current_traversable / part
 
-            relevant_files = [
-                file for file in all_files if (path + "/" + resource_name) in str(file)
-            ]
+            if current_traversable.is_dir():
+                for file_traversable in current_traversable.iterdir():
+                    if file_traversable.is_dir():
+                        # Recurse into subdirectories
+                        _walk_dir(*(parts + (file_traversable.name,)))
 
-            for file in relevant_files:
-                if not file.name.lower().endswith(".json"):
-                    continue
-
-                template_name = build_index_from_parts(*(parts + (file.stem,)))
-                result[template_name] = file
+                    if (
+                        file_traversable.is_file()
+                        and file_traversable.name.lower().endswith(".json")
+                    ):
+                        file_stem = file_traversable.name.split("/")[-1].strip(".json")
+                        template_name = build_index_from_parts(*(parts + (file_stem,)))
+                        result[template_name] = file_traversable
 
         _walk_dir()
         return result
@@ -489,7 +499,6 @@ class _SearchState(object):
         """
         ignore = ignore or []
 
-        # template is now instance of PackagePath
         body = template_file.read_text()
         replaced_body = self._replace_prefix(template_file, body, enforce_prefix)
         template_name = build_alias_name(template_name, app=self.app)

@@ -29,7 +29,6 @@ def _get_version():
     return version.format(search_major_version)
 
 
-@pytest.mark.skip
 def test_init(app, template_entrypoints):
     """Run client initialization."""
     suffix = "-abc"
@@ -110,7 +109,6 @@ def test_init(app, template_entrypoints):
     assert 0 == len(aliases)
 
 
-@pytest.mark.skip
 def test_list(app):
     """Run listing of mappings."""
     suffix = "-abc"

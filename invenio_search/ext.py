@@ -12,6 +12,7 @@
 
 import json
 import warnings
+from collections import namedtuple
 from importlib.resources import files as resources_files
 
 import dictdiffer
@@ -28,6 +29,8 @@ from .utils import (
     build_index_name,
     timestamp_suffix,
 )
+
+MappingRec = namedtuple("MappingRec", ["index_name", "file_traversable", "index_path"])
 
 
 class _SearchState(object):
@@ -123,26 +126,7 @@ class _SearchState(object):
             # The fallback can be removed after transition to OpenSearch.
             files = resources_files(module)
 
-            subfolder_parts = module.split(".")[1:] + [subfolder]
-            subfolder_path = "/".join(subfolder_parts)
-
-            def any_path_contains_str(traversable, path_part: str) -> bool:
-                """Check if any path inside `traversable` contains `path_part`."""
-                stack = [traversable]
-                while stack:
-                    current = stack.pop()
-                    current_str = str(current)
-                    # TODO: maybe check that there is at least 1 file in os-v2 folder
-                    if path_part in current_str:
-                        return True
-                    if current.is_dir():
-                        try:
-                            stack.extend(current.iterdir())
-                        except NotADirectoryError:
-                            pass
-                return False
-
-            if not any_path_contains_str(files, subfolder_path):
+            if not (files / subfolder).is_dir():
                 subfolder = "v7"
                 warnings.warn(
                     f"OpenSearch v{search_major_version} mappings files not found, "
@@ -169,36 +153,46 @@ class _SearchState(object):
         """
         package_name = self._get_mappings_module(package_name)
 
-        def _walk_dir(aliases, *parts):
-            root_name = build_index_from_parts(*parts)
-            data = aliases.get(root_name, {})
+        root = resources_files(package_name)
+        path = root / alias
 
-            files = resources_files(package_name)
-            current_traversable = files
-            for part in parts:
-                current_traversable = current_traversable / part
+        for mapping_rec in self._walk_dir(root, path):
+            self.mappings[mapping_rec.index_name] = mapping_rec.file_traversable
 
-            if current_traversable.is_dir():
-                for file_traversable in current_traversable.iterdir():
-                    if file_traversable.is_dir():
-                        # Recurse into subdirectories
-                        _walk_dir(data, *(parts + (file_traversable.name,)))
+            data = self.aliases
+            for p in mapping_rec.index_path:
+                data = data.setdefault(p, {})
 
-                    if (
-                        file_traversable.is_file()
-                        and file_traversable.name.lower().endswith(".json")
-                    ):
-                        # split the path, get file name and remove the .json extension
-                        file_stem = file_traversable.name.split("/")[-1].strip(".json")
-                        index_name = build_index_from_parts(*(parts + (file_stem,)))
+            assert mapping_rec.index_name not in data, (
+                f"Duplicate index: {mapping_rec.index_name}"
+            )
+            data[mapping_rec.index_name] = mapping_rec.file_traversable
 
-                        assert index_name not in data, f"Duplicate index: {index_name}"
-                        data[index_name] = file_traversable
-                        self.mappings[index_name] = file_traversable
+    def _walk_dir(self, root, path, index_path=[]):
+        """Walk through a directory and collect mappings."""
+        parts = path.relative_to(root).parts
+        root_name = build_index_from_parts(*parts)
 
-            aliases[root_name] = data
+        if path.is_dir():
+            for file_traversable in path.iterdir():
+                if file_traversable.is_dir():
+                    # Recurse into subdirectories
+                    yield from self._walk_dir(
+                        root, file_traversable, index_path + [root_name]
+                    )
 
-        _walk_dir(self.aliases, alias)
+                if (
+                    file_traversable.is_file()
+                    and file_traversable.name.lower().endswith(".json")
+                ):
+                    # split the path, get file name and remove the .json extension
+                    file_stem = file_traversable.name.split("/")[-1].strip(".json")
+                    index_name = build_index_from_parts(*(parts + (file_stem,)))
+                    yield MappingRec(
+                        index_name=index_name,
+                        file_traversable=file_traversable,
+                        index_path=index_path + [root_name],
+                    )
 
     def register_templates(self, module):
         """Register templates from the provided module.
@@ -206,34 +200,12 @@ class _SearchState(object):
         :param module: The templates module.
         """
         module = self._get_mappings_module(module)
-        result = {}
+        root = resources_files(module)
 
-        def _walk_dir(*parts):
-            parts = parts or tuple()
-
-            # same logic as in register_mappings(...)
-            package_root = module.split(".")[0]
-            files = resources_files(package_root)
-            current_traversable = files
-            for part in parts:
-                current_traversable = current_traversable / part
-
-            if current_traversable.is_dir():
-                for file_traversable in current_traversable.iterdir():
-                    if file_traversable.is_dir():
-                        # Recurse into subdirectories
-                        _walk_dir(*(parts + (file_traversable.name,)))
-
-                    if (
-                        file_traversable.is_file()
-                        and file_traversable.name.lower().endswith(".json")
-                    ):
-                        file_stem = file_traversable.name.split("/")[-1].strip(".json")
-                        template_name = build_index_from_parts(*(parts + (file_stem,)))
-                        result[template_name] = file_traversable
-
-        _walk_dir()
-        return result
+        return {
+            mapping_rec.index_name: mapping_rec.file_traversable
+            for mapping_rec in self._walk_dir(root, root)
+        }
 
     def load_entry_point_group_mappings(self, entry_point_group_mappings):
         """Load actions from an entry point group."""

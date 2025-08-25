@@ -186,7 +186,9 @@ class _SearchState(object):
                     and file_traversable.name.lower().endswith(".json")
                 ):
                     # split the path, get file name and remove the .json extension
-                    file_stem = file_traversable.name.split("/")[-1].strip(".json")
+                    file_stem = file_traversable.name.split("/")[-1].removesuffix(
+                        ".json"
+                    )
                     index_name = build_index_from_parts(*(parts + (file_stem,)))
                     yield MappingRec(
                         index_name=index_name,

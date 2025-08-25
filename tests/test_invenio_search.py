@@ -231,6 +231,7 @@ def test_creating_alias_existing_index(
         with pytest.raises(Exception):
             results = list(current_search.create(ignore=None))
         indices = current_search_client.indices.get("*", expand_wildcards="all")
+        index_names = list(indices.keys())
         # filter out hidden indices like .plugins-ml-config
         index_names = [i for i in index_names if not i.startswith(".")]
         assert index_names == new_indexes

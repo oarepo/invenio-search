@@ -126,7 +126,7 @@ class _SearchState(object):
             # The fallback can be removed after transition to OpenSearch.
             files = resources_files(module)
 
-            if not (files / subfolder).is_dir():
+            if not (files.joinpath(subfolder)).is_dir():
                 subfolder = "v7"
                 warnings.warn(
                     f"OpenSearch v{search_major_version} mappings files not found, "
@@ -154,23 +154,23 @@ class _SearchState(object):
         package_name = self._get_mappings_module(package_name)
 
         root = resources_files(package_name)
-        path = root / alias
+        path = root.joinpath(alias)
 
-        for mapping_rec in self._walk_dir(root, path):
+        for mapping_rec in self._walk_dir(root, path, parts=(alias,)):
             self.mappings[mapping_rec.index_name] = mapping_rec.file_traversable
 
             data = self.aliases
             for p in mapping_rec.index_path:
                 data = data.setdefault(p, {})
 
-            assert (
-                mapping_rec.index_name not in data
-            ), f"Duplicate index: {mapping_rec.index_name}"
+            assert mapping_rec.index_name not in data, (
+                f"Duplicate index: {mapping_rec.index_name}"
+            )
             data[mapping_rec.index_name] = mapping_rec.file_traversable
 
-    def _walk_dir(self, root, path, index_path=[]):
+    def _walk_dir(self, root, path, index_path=[], parts=()):
         """Walk through a directory and collect mappings."""
-        parts = path.relative_to(root).parts
+
         root_name = build_index_from_parts(*parts)
 
         if path.is_dir():
@@ -178,7 +178,10 @@ class _SearchState(object):
                 if file_traversable.is_dir():
                     # Recurse into subdirectories
                     yield from self._walk_dir(
-                        root, file_traversable, index_path + [root_name]
+                        root,
+                        file_traversable,
+                        index_path + [root_name],
+                        parts + (file_traversable.name,),
                     )
 
                 if (

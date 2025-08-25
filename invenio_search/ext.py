@@ -11,9 +11,9 @@
 """Invenio module for information retrieval."""
 
 import json
-import os
 import warnings
-from importlib.resources import files
+from collections import namedtuple
+from importlib.resources import files as resources_files
 
 import dictdiffer
 from invenio_base.utils import entry_points
@@ -29,6 +29,8 @@ from .utils import (
     build_index_name,
     timestamp_suffix,
 )
+
+MappingRec = namedtuple("MappingRec", ["index_name", "file_traversable", "index_path"])
 
 
 class _SearchState(object):
@@ -122,15 +124,16 @@ class _SearchState(object):
 
             # Make sure that the OpenSearch mappings are in the folder.
             # The fallback can be removed after transition to OpenSearch.
-            if not (files(module) / subfolder).is_dir():
-                # fallback to ES folder with a warning if `os-vx` is not found
+            files = resources_files(module)
+
+            if not (files.joinpath(subfolder)).is_dir():
                 subfolder = "v7"
                 warnings.warn(
-                    "OpenSearch v{version} mappings files not found, falling back to Elasticsearch v7 mappings for module {module}. Please add the missing OpenSearch os-v{version} mappings.".format(
-                        module=module,
-                        version=search_major_version,
-                    )
+                    f"OpenSearch v{search_major_version} mappings files not found, "
+                    f"falling back to Elasticsearch v7 mappings for module {module}. "
+                    f"Please add the missing OpenSearch os-v{search_major_version} mappings."
                 )
+
         else:
             # should never happen
             raise RuntimeError(
@@ -144,39 +147,56 @@ class _SearchState(object):
 
         :param alias: The alias.
         :param package_name: The package name.
+
+        .. note:: Implementation then later assumes that mappings/templates have implemented read_text() function.
+        In the current version all paths to mappings/templates are instances of PackagePath.
         """
         package_name = self._get_mappings_module(package_name)
 
-        def _walk_dir(aliases, *parts):
-            root_name = build_index_from_parts(*parts)
-            resource_name = os.path.join(*parts)
+        root = resources_files(package_name)
+        path = root.joinpath(alias)
 
-            data = aliases.get(root_name, {})
+        for mapping_rec in self._walk_dir(root, path, parts=(alias,)):
+            self.mappings[mapping_rec.index_name] = mapping_rec.file_traversable
 
-            for filename in os.listdir(files(package_name) / resource_name):
-                file_path = os.path.join(resource_name, filename)
+            data = self.aliases
+            for p in mapping_rec.index_path:
+                data = data.setdefault(p, {})
 
-                if (files(package_name) / file_path).is_dir():
-                    _walk_dir(data, *(parts + (filename,)))
-                    continue
+            assert (
+                mapping_rec.index_name not in data
+            ), f"Duplicate index: {mapping_rec.index_name}"
+            data[mapping_rec.index_name] = mapping_rec.file_traversable
 
-                filename_root, ext = os.path.splitext(filename)
-                if ext not in {
-                    ".json",
-                }:
-                    continue
+    def _walk_dir(self, root, path, index_path=[], parts=()):
+        """Walk through a directory and collect mappings."""
+        root_name = build_index_from_parts(*parts)
 
-                index_name = build_index_from_parts(*(parts + (filename_root,)))
-                assert index_name not in data, "Duplicate index"
+        if path.is_dir():
+            for file_traversable in path.iterdir():
+                if file_traversable.is_dir():
+                    # Recurse into subdirectories
+                    yield from self._walk_dir(
+                        root,
+                        file_traversable,
+                        index_path + [root_name],
+                        parts + (file_traversable.name,),
+                    )
 
-                filename = os.path.join(files(package_name), resource_name, filename)
-                data[index_name] = filename
-                self.mappings[index_name] = filename
-
-            aliases[root_name] = data
-
-        # Start the recursion here:
-        _walk_dir(self.aliases, alias)
+                if (
+                    file_traversable.is_file()
+                    and file_traversable.name.lower().endswith(".json")
+                ):
+                    # split the path, get file name and remove the .json extension
+                    file_stem = file_traversable.name.split("/")[-1].removesuffix(
+                        ".json"
+                    )
+                    index_name = build_index_from_parts(*(parts + (file_stem,)))
+                    yield MappingRec(
+                        index_name=index_name,
+                        file_traversable=file_traversable,
+                        index_path=index_path + [root_name],
+                    )
 
     def register_templates(self, module):
         """Register templates from the provided module.
@@ -184,31 +204,12 @@ class _SearchState(object):
         :param module: The templates module.
         """
         module = self._get_mappings_module(module)
-        result = {}
+        root = resources_files(module)
 
-        def _walk_dir(*parts):
-            parts = parts or tuple()
-            resource_name = os.path.join(*parts) if parts else ""
-            for filename in os.listdir(files(module) / resource_name):
-                file_path = os.path.join(resource_name, filename)
-
-                if (files(module) / file_path).is_dir():
-                    _walk_dir(*(parts + (filename,)))
-                    continue
-
-                filename_root, ext = os.path.splitext(filename)
-                if ext not in {
-                    ".json",
-                }:
-                    continue
-
-                template_name = build_index_from_parts(*(parts + (filename_root,)))
-                filename = os.path.join(files(module), resource_name, filename)
-                result[template_name] = filename
-
-        # Start the recursion here:
-        _walk_dir()
-        return result
+        return {
+            mapping_rec.index_name: mapping_rec.file_traversable
+            for mapping_rec in self._walk_dir(root, root)
+        }
 
     def load_entry_point_group_mappings(self, entry_point_group_mappings):
         """Load actions from an entry point group."""
@@ -306,31 +307,33 @@ class _SearchState(object):
         # index if the current instance is running without suffixes
         # make sure there is no index with the same name as the
         # alias name (i.e. the index name without the suffix).
-        with open(mapping_path, "r") as body:
-            final_index = build_index_name(
-                index, prefix=prefix, suffix=suffix, app=self.app
+
+        # mapping path is now instance of PackagePath
+        body = mapping_path.read_text()
+        final_index = build_index_name(
+            index, prefix=prefix, suffix=suffix, app=self.app
+        )
+        if create_write_alias:
+            final_alias = build_alias_name(index, prefix=prefix, app=self.app)
+        index_result = (
+            self.client.indices.create(
+                index=final_index,
+                body=json.loads(body),
+                ignore=ignore,
             )
-            if create_write_alias:
-                final_alias = build_alias_name(index, prefix=prefix, app=self.app)
-            index_result = (
-                self.client.indices.create(
+            if not dry_run
+            else None
+        )
+        if create_write_alias:
+            alias_result = (
+                self.client.indices.put_alias(
                     index=final_index,
-                    body=json.load(body),
+                    name=final_alias,
                     ignore=ignore,
                 )
                 if not dry_run
                 else None
             )
-            if create_write_alias:
-                alias_result = (
-                    self.client.indices.put_alias(
-                        index=final_index,
-                        name=final_alias,
-                        ignore=ignore,
-                    )
-                    if not dry_run
-                    else None
-                )
         return (final_index, index_result), (final_alias, alias_result)
 
     def create(self, ignore=None, ignore_existing=False, index_list=None):
@@ -430,22 +433,23 @@ class _SearchState(object):
         # need to initialise Index class to use the .put_mapping API wrapper method
         index_ = dsl.Index(full_index_name, using=self.client)
 
-        with open(mapping_path, "r") as body:
-            mapping = json.load(body)["mappings"]
-            changes = list(dictdiffer.diff(old_mapping, mapping))
+        # mapping path is now instance of PackagePath
+        body = mapping_path.read_text()
+        mapping = json.loads(body)["mappings"]
+        changes = list(dictdiffer.diff(old_mapping, mapping))
 
-            # allow only additions to mappings (backwards compatibility is kept)
-            if not check or all([change[0] == "add" for change in changes]):
-                # raises 400 if the mapping cannot be updated
-                # (f.e. type changes or index needs to be closed)
-                index_.put_mapping(using=self.client, body=mapping)
-            else:
-                non_add_changes = [change for change in changes if change[0] != "add"]
-                raise NotAllowedMappingUpdate(
-                    "Only additions are allowed when updating mappings to keep backwards compatibility. "
-                    f"This mapping has {len(non_add_changes)} non addition changes.\n\n"
-                    f"Full list of changes: {changes}"
-                )
+        # allow only additions to mappings (backwards compatibility is kept)
+        if not check or all([change[0] == "add" for change in changes]):
+            # raises 400 if the mapping cannot be updated
+            # (f.e. type changes or index needs to be closed)
+            index_.put_mapping(using=self.client, body=mapping)
+        else:
+            non_add_changes = [change for change in changes if change[0] != "add"]
+            raise NotAllowedMappingUpdate(
+                "Only additions are allowed when updating mappings to keep backwards compatibility. "
+                f"This mapping has {len(non_add_changes)} non addition changes.\n\n"
+                f"Full list of changes: {changes}"
+            )
 
     def _replace_prefix(self, template_path, body, enforce_prefix):
         """Replace index prefix in template request body."""
@@ -470,15 +474,15 @@ class _SearchState(object):
         fail if the template does not use the prefix
         """
         ignore = ignore or []
-        with open(template_file, "r") as fp:
-            body = fp.read()
-            replaced_body = self._replace_prefix(template_file, body, enforce_prefix)
-            template_name = build_alias_name(template_name, app=self.app)
-            return template_file, put_function(
-                name=template_name,
-                body=json.loads(replaced_body),
-                ignore=ignore,
-            )
+
+        body = template_file.read_text()
+        replaced_body = self._replace_prefix(template_file, body, enforce_prefix)
+        template_name = build_alias_name(template_name, app=self.app)
+        return template_file, put_function(
+            name=template_name,
+            body=json.loads(replaced_body),
+            ignore=ignore,
+        )
 
     def put_templates(self, ignore=None):
         """Yield tuple with registered template and response from client."""

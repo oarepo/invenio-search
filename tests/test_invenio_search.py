@@ -10,6 +10,7 @@
 
 
 """Module tests."""
+
 import json
 from collections import defaultdict
 
@@ -55,7 +56,7 @@ def test_client_config():
     app.config["SEARCH_CLIENT_CONFIG"] = {"timeout": 30, "foo": "bar"}
 
     # instead of patching ES directly, we go via our transparency module
-    with patch(f"invenio_search.engine.SearchEngine.__init__") as mock_search_init:
+    with patch("invenio_search.engine.SearchEngine.__init__") as mock_search_init:
         mock_search_init.return_value = None
         ext = InvenioSearch(app)
         es_client = ext.client  # trigger client initialization
@@ -231,6 +232,8 @@ def test_creating_alias_existing_index(
             results = list(current_search.create(ignore=None))
         indices = current_search_client.indices.get("*", expand_wildcards="all")
         index_names = list(indices.keys())
+        # filter out hidden indices like .plugins-ml-config
+        index_names = [i for i in index_names if not i.startswith(".")]
         assert index_names == new_indexes
         if create_index:
             assert len(indices[create_index]["aliases"]) == 0
@@ -411,9 +414,7 @@ def test_create_selected_indexes(app):
     assert (
         search.client.indices.exists_alias(
             "records-bibliographic-bibliographic-v1.0.0",
-            "records,"
-            "records-bibliographic,"
-            "records-bibliographic-bibliographic-v1.0.0",
+            "records,records-bibliographic,records-bibliographic-bibliographic-v1.0.0",
         )
         is True
     )

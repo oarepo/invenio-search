@@ -163,9 +163,9 @@ class _SearchState(object):
             for p in mapping_rec.index_path:
                 data = data.setdefault(p, {})
 
-            assert mapping_rec.index_name not in data, (
-                f"Duplicate index: {mapping_rec.index_name}"
-            )
+            assert (
+                mapping_rec.index_name not in data
+            ), f"Duplicate index: {mapping_rec.index_name}"
             data[mapping_rec.index_name] = mapping_rec.file_traversable
 
     def _walk_dir(self, root, path, index_path=[], parts=()):

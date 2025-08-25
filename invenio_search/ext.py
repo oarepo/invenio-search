@@ -170,7 +170,6 @@ class _SearchState(object):
 
     def _walk_dir(self, root, path, index_path=[], parts=()):
         """Walk through a directory and collect mappings."""
-
         root_name = build_index_from_parts(*parts)
 
         if path.is_dir():
